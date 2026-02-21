@@ -9,6 +9,7 @@ Built with [Textual](https://github.com/Textualize/textual).
 
 ![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
 ![Textual](https://img.shields.io/badge/ui-textual-blueviolet)
+![License: MIT](https://img.shields.io/badge/license-MIT-green)
 
 ---
 
