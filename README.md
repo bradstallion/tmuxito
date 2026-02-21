@@ -11,6 +11,9 @@ Built with [Textual](https://github.com/Textualize/textual).
 ![Textual](https://img.shields.io/badge/ui-textual-blueviolet)
 ![License: MIT](https://img.shields.io/badge/license-MIT-green)
 
+![screenshot](docs/screenshot1.png)
+![screenshot](docs/screenshot2.png)
+
 ---
 
 ## Features
