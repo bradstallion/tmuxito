@@ -152,6 +152,39 @@ def list_windows(session: str) -> list[TmuxWindow]:
         return []
 
 
+def new_window(session: str, name: str = "") -> bool:
+    args = ["tmux", "new-window", "-d", "-t", session]
+    if name:
+        args += ["-n", name]
+    if not is_installed():
+        return False
+    try:
+        res = _run(args)
+        return res.returncode == 0
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return False
+
+
+def kill_window(session: str, window_index: int) -> bool:
+    if not is_installed():
+        return False
+    try:
+        res = _run(["tmux", "kill-window", "-t", f"{session}:{window_index}"])
+        return res.returncode == 0
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return False
+
+
+def rename_window(session: str, window_index: int, new_name: str) -> bool:
+    if not is_installed():
+        return False
+    try:
+        res = _run(["tmux", "rename-window", "-t", f"{session}:{window_index}", new_name])
+        return res.returncode == 0
+    except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+        return False
+
+
 def attach_command(target: str) -> list[str]:
     """Return the correct tmux command to attach to *target* (session or session:window)."""
     if os.environ.get("TMUX"):

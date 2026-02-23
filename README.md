@@ -101,6 +101,9 @@ python -m tmuxito
 | Key | Action |
 |-----|--------|
 | `Enter` | Attach to selected window |
+| `n` | New window |
+| `r` | Rename selected window |
+| `k` | Kill selected window (confirmation prompt) |
 | `Esc` | Back to session list |
 
 ### Help screen

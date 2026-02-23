@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "tmuxito"
-version = "0.1.1"
+version = "0.1.2"
 description = "tmux sessions made simple, because you forgot what was running..."
 readme = "README.md"
 requires-python = ">=3.10"

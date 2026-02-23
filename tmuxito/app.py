@@ -26,7 +26,7 @@ from tmuxito.help import HELP_CONTENT
 # ── Modal: kill confirmation ──────────────────────────────────────────────────
 
 class KillConfirmScreen(ModalScreen):
-    """Ask the user to confirm before killing a session."""
+    """Ask the user to confirm a destructive action."""
 
     BINDINGS = [
         Binding("y", "confirm", "Yes"),
@@ -34,16 +34,13 @@ class KillConfirmScreen(ModalScreen):
         Binding("escape", "cancel", "Cancel"),
     ]
 
-    def __init__(self, session_name: str) -> None:
+    def __init__(self, label: str) -> None:
         super().__init__()
-        self.session_name = session_name
+        self.label = label
 
     def compose(self) -> ComposeResult:
         with Container(id="kill-dialog"):
-            yield Label(
-                f"Kill session [bold red]{self.session_name!r}[/bold red]?",
-                id="kill-label",
-            )
+            yield Label(self.label, id="kill-label")
             with Horizontal(id="kill-buttons"):
                 yield Button("Yes  [y]", variant="error", id="btn-yes")
                 yield Button("No  [n]", variant="primary", id="btn-no")
@@ -61,14 +58,19 @@ class KillConfirmScreen(ModalScreen):
 # ── Modal: new session ────────────────────────────────────────────────────────
 
 class NewSessionScreen(ModalScreen):
-    """Prompt for a new session name."""
+    """Prompt for a name to create something new."""
 
     BINDINGS = [Binding("escape", "cancel", "Cancel")]
 
+    def __init__(self, title: str = "New session name:", placeholder: str = "my-session") -> None:
+        super().__init__()
+        self._title = title
+        self._placeholder = placeholder
+
     def compose(self) -> ComposeResult:
         with Container(id="new-session-dialog"):
-            yield Label("New session name:")
-            yield Input(placeholder="my-session", id="new-name")
+            yield Label(self._title)
+            yield Input(placeholder=self._placeholder, id="new-name")
             with Horizontal(classes="dialog-buttons"):
                 yield Button("Create", variant="primary", id="btn-create")
                 yield Button("Cancel", id="btn-cancel")
@@ -93,17 +95,18 @@ class NewSessionScreen(ModalScreen):
 # ── Modal: rename session ─────────────────────────────────────────────────────
 
 class RenameSessionScreen(ModalScreen):
-    """Prompt for a new name for an existing session."""
+    """Prompt for a new name for an existing item."""
 
     BINDINGS = [Binding("escape", "cancel", "Cancel")]
 
-    def __init__(self, current_name: str) -> None:
+    def __init__(self, current_name: str, title: Optional[str] = None) -> None:
         super().__init__()
         self.current_name = current_name
+        self._title = title or f"Rename [bold]{current_name!r}[/bold]:"
 
     def compose(self) -> ComposeResult:
         with Container(id="rename-dialog"):
-            yield Label(f"Rename [bold]{self.current_name!r}[/bold]:")
+            yield Label(self._title)
             yield Input(value=self.current_name, id="rename-name")
             with Horizontal(classes="dialog-buttons"):
                 yield Button("Rename", variant="primary", id="btn-rename")
@@ -152,12 +155,15 @@ class HelpScreen(Screen):
 # ── Window drill-down screen ──────────────────────────────────────────────────
 
 class WindowScreen(Screen):
-    """List windows of a selected session; attach directly to a window."""
+    """List windows of a selected session; attach, create, rename, kill."""
 
     BINDINGS = [
         Binding("escape", "go_back", "Back"),
         Binding("q", "go_back", "Back", show=False),
         Binding("enter", "attach_window", "Attach", priority=True),
+        Binding("n", "new_window", "New"),
+        Binding("r", "rename_window", "Rename"),
+        Binding("k", "kill_window", "Kill"),
     ]
 
     def __init__(self, session_name: str) -> None:
@@ -167,13 +173,15 @@ class WindowScreen(Screen):
 
     def compose(self) -> ComposeResult:
         yield Label("", id="win-title")
-        yield DataTable(id="win-table", cursor_type="row", zebra_stripes=True)
+        with Horizontal(id="win-main"):
+            yield DataTable(id="win-table", cursor_type="row", zebra_stripes=True)
+            with ScrollableContainer(id="win-preview-panel"):
+                yield Static("", id="win-preview-content")
         yield Footer()
 
     def on_mount(self) -> None:
         self.query_one("#win-title", Label).update(
-            f"Session [bold cyan]{self.session_name}[/bold cyan] — Windows  "
-            f"([dim]Enter[/dim] attach · [dim]Esc[/dim] back)"
+            f"Session [bold cyan]{self.session_name}[/bold cyan] — Windows"
         )
         table = self.query_one("#win-table", DataTable)
         table.add_column("#", key="idx", width=4)
@@ -181,6 +189,7 @@ class WindowScreen(Screen):
         table.add_column("Active", key="active", width=8)
         table.add_column("Panes", key="panes", width=6)
         self._load_windows()
+        self.set_interval(3.0, self._refresh_preview)
         table.focus()
 
     def _load_windows(self) -> None:
@@ -194,13 +203,93 @@ class WindowScreen(Screen):
             active = "[bold green]●[/bold green]" if w.active else "○"
             table.add_row(str(w.index), w.name, active, str(w.panes))
 
-    def action_attach_window(self) -> None:
+    def _refresh_preview(self) -> None:
+        w = self._selected_window()
+        panel = self.query_one("#win-preview-content", Static)
+        if not w:
+            panel.update("")
+            return
+        raw = tmux_ops.capture_pane(f"{self.session_name}:{w.index}")
+        if not raw.strip():
+            panel.update(f"[dim]No output for '{w.name}'[/dim]")
+            return
+        try:
+            panel.update(Text.from_ansi(raw))
+        except Exception:
+            panel.update(raw)
+
+    def on_data_table_row_highlighted(self, _: DataTable.RowHighlighted) -> None:
+        self._refresh_preview()
+
+    def _selected_window(self) -> Optional[tmux_ops.TmuxWindow]:
         table = self.query_one("#win-table", DataTable)
         row = table.cursor_row
-        if not self._windows or row >= len(self._windows):
+        if self._windows and 0 <= row < len(self._windows):
+            return self._windows[row]
+        return None
+
+    def action_attach_window(self) -> None:
+        w = self._selected_window()
+        if w:
+            self.app.exit(f"{self.session_name}:{w.index}")
+
+    def action_new_window(self) -> None:
+        def _done(name: Optional[str]) -> None:
+            ok = tmux_ops.new_window(self.session_name, name or "")
+            if ok:
+                self.notify(f"Created window '{name}'" if name else "Created new window")
+                self._load_windows()
+            else:
+                self.notify("Failed to create window", severity="error")
+
+        self.app.push_screen(
+            NewSessionScreen(title="New window name:", placeholder="my-window"),
+            _done,
+        )
+
+    def action_rename_window(self) -> None:
+        w = self._selected_window()
+        if not w:
             return
-        window = self._windows[row]
-        self.app.exit(f"{self.session_name}:{window.index}")
+
+        def _done(new_name: Optional[str]) -> None:
+            if new_name:
+                ok = tmux_ops.rename_window(self.session_name, w.index, new_name)
+                if ok:
+                    self.notify(f"Renamed to '{new_name}'")
+                    self._load_windows()
+                else:
+                    self.notify("Rename failed", severity="error")
+
+        self.app.push_screen(
+            RenameSessionScreen(
+                current_name=w.name,
+                title=f"Rename window [bold]{w.name!r}[/bold]:",
+            ),
+            _done,
+        )
+
+    def action_kill_window(self) -> None:
+        w = self._selected_window()
+        if not w:
+            return
+        if len(self._windows) == 1:
+            self.notify("Cannot kill the last window of a session", severity="error")
+            return
+
+        def _done(confirmed: bool) -> None:
+            if confirmed:
+                ok = tmux_ops.kill_window(self.session_name, w.index)
+                if ok:
+                    self.notify(f"Killed window '{w.name}'")
+                    self._load_windows()
+                else:
+                    self.notify("Failed to kill window", severity="error")
+
+        self.app.push_screen(
+            KillConfirmScreen(f"Kill window [bold red]{w.name!r}[/bold red]?"),
+            _done,
+        )
 
     def action_go_back(self) -> None:
         self.app.pop_screen()
@@ -418,7 +507,9 @@ class SessionScreen(Screen):
                 if confirmed:
                     self._do_kill(name)
 
-            self.app.push_screen(KillConfirmScreen(name), _done)
+            self.app.push_screen(KillConfirmScreen(
+                f"Kill session [bold red]{name!r}[/bold red]?"
+            ), _done)
 
     def _do_kill(self, name: str) -> None:
         ok = tmux_ops.kill_session(name)
@@ -502,8 +593,25 @@ class TmuxNavigatorApp(App):
         color: $text;
     }
 
-    #win-table {
+    #win-main {
         height: 1fr;
+    }
+
+    #win-table {
+        width: 60%;
+        height: 100%;
+        border-right: tall $primary-darken-2;
+    }
+
+    #win-preview-panel {
+        width: 1fr;
+        height: 100%;
+        background: $surface-darken-1;
+        padding: 1 2;
+    }
+
+    #win-preview-content {
+        width: 100%;
     }
 
     /* ── Help screen ────────────────────────────────────────────────────── */
